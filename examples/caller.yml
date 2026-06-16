@@ -1,0 +1,135 @@
+# =============================================================================
+# Claude Code Issue Commands — Consumer Caller
+# =============================================================================
+#
+# INSTALLATION:
+#   1. Copy this file to your repo at .github/workflows/claude-commands.yml
+#   2. Replace `your-org/claude-code-commands` below with the actual owner/repo
+#      that hosts the reusable workflow (e.g. `my-org/claude-code-commands`).
+#   3. Install the Claude GitHub App on your repo: https://github.com/apps/claude
+#   4. Add ONE of these secrets to your repo's Settings → Secrets → Actions:
+#        - ANTHROPIC_API_KEY  (from https://console.anthropic.com)
+#        - CLAUDE_CODE_OAUTH_TOKEN (if you have a Claude Code subscription)
+#
+# IMPORTANT — SECRETS ARE NOT INHERITED:
+#   This workflow does NOT use `secrets: inherit`. The reusable workflow's repo
+#   secrets are never exposed to your workflow runs. You must add your own
+#   ANTHROPIC_API_KEY (or CLAUDE_CODE_OAUTH_TOKEN) in your repo's settings.
+#
+# OPTIONAL — GitHub App for higher permissions:
+#   If you want Claude's commits to trigger your CI workflows (the default
+#   GITHUB_TOKEN cannot trigger downstream workflows), create a GitHub App,
+#   install it on your repo, and add APP_ID + APP_PRIVATE_KEY to your secrets.
+#   Then uncomment the `app_id` / `app_private_key` lines in each job below.
+#
+# USAGE:
+#   Comment on any issue (team members only):
+#     /triage              — analyze the issue and suggest next steps
+#     /reprex              — attempt to reproduce the issue on a Linux runner
+#     /duplicate           — search for duplicate or similar issues
+#     /issue-fix           — write a fix, run tests, and open a PR
+#
+#   You can also pass extra instructions after the command:
+#     /triage focus on the authentication flow
+#     /issue-fix only modify files in src/auth/
+# =============================================================================
+
+name: Claude Code Issue Commands
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions: read-all
+
+jobs:
+  parse:
+    name: Parse command
+    runs-on: ubuntu-latest
+    outputs:
+      command: ${{ steps.parse.outputs.command }}
+      issue_number: ${{ steps.parse.outputs.issue_number }}
+      comment_id: ${{ steps.parse.outputs.comment_id }}
+      prompt_suffix: ${{ steps.parse.outputs.prompt_suffix }}
+    steps:
+      - id: parse
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const allow = ['MEMBER', 'OWNER', 'COLLABORATOR'];
+            const isPR = !!context.payload.issue.pull_request;
+            const assoc = context.payload.comment.author_association;
+            const body = (context.payload.comment.body || '').trim();
+            const m = body.match(/^\/(triage|reprex|duplicate|issue-fix)(?:\s+([\s\S]*))?$/);
+
+            if (!isPR && m && allow.includes(assoc)) {
+              core.setOutput('command', m[1]);
+              core.setOutput('issue_number', String(context.payload.issue.number));
+              core.setOutput('comment_id', String(context.payload.comment.id));
+              core.setOutput('prompt_suffix', (m[2] || '').trim());
+            } else {
+              core.setOutput('command', '');
+              core.setOutput('issue_number', '');
+              core.setOutput('comment_id', '');
+              core.setOutput('prompt_suffix', '');
+            }
+
+  triage:
+    needs: parse
+    if: ${{ needs.parse.outputs.command == 'triage' }}
+    uses: your-org/claude-code-commands/.github/workflows/commands.yml@v1
+    with:
+      command: triage
+      issue_number: ${{ fromJSON(needs.parse.outputs.issue_number) }}
+      comment_id: ${{ fromJSON(needs.parse.outputs.comment_id) }}
+      prompt_suffix: ${{ needs.parse.outputs.prompt_suffix }}
+    secrets:
+      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+      # claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      # app_id: ${{ secrets.APP_ID }}
+      # app_private_key: ${{ secrets.APP_PRIVATE_KEY }}
+
+  reprex:
+    needs: parse
+    if: ${{ needs.parse.outputs.command == 'reprex' }}
+    uses: your-org/claude-code-commands/.github/workflows/commands.yml@v1
+    with:
+      command: reprex
+      issue_number: ${{ fromJSON(needs.parse.outputs.issue_number) }}
+      comment_id: ${{ fromJSON(needs.parse.outputs.comment_id) }}
+      prompt_suffix: ${{ needs.parse.outputs.prompt_suffix }}
+    secrets:
+      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+      # claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      # app_id: ${{ secrets.APP_ID }}
+      # app_private_key: ${{ secrets.APP_PRIVATE_KEY }}
+
+  duplicate:
+    needs: parse
+    if: ${{ needs.parse.outputs.command == 'duplicate' }}
+    uses: your-org/claude-code-commands/.github/workflows/commands.yml@v1
+    with:
+      command: duplicate
+      issue_number: ${{ fromJSON(needs.parse.outputs.issue_number) }}
+      comment_id: ${{ fromJSON(needs.parse.outputs.comment_id) }}
+      prompt_suffix: ${{ needs.parse.outputs.prompt_suffix }}
+    secrets:
+      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+      # claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      # app_id: ${{ secrets.APP_ID }}
+      # app_private_key: ${{ secrets.APP_PRIVATE_KEY }}
+
+  issue-fix:
+    needs: parse
+    if: ${{ needs.parse.outputs.command == 'issue-fix' }}
+    uses: your-org/claude-code-commands/.github/workflows/commands.yml@v1
+    with:
+      command: issue-fix
+      issue_number: ${{ fromJSON(needs.parse.outputs.issue_number) }}
+      comment_id: ${{ fromJSON(needs.parse.outputs.comment_id) }}
+      prompt_suffix: ${{ needs.parse.outputs.prompt_suffix }}
+    secrets:
+      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+      # claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      # app_id: ${{ secrets.APP_ID }}
+      # app_private_key: ${{ secrets.APP_PRIVATE_KEY }}

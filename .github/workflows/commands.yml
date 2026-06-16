@@ -1,173 +1,232 @@
-name: Issue Commands
+name: 'Claude Code Issue Commands (Reusable)'
 
 on:
-  issue_comment:
-    types: [created]
+  workflow_call:
+    inputs:
+      command:
+        description: 'Which slash command to run'
+        required: true
+        type: choice
+        options:
+          - triage
+          - reprex
+          - duplicate
+          - issue-fix
+      issue_number:
+        description: 'Issue number to act on'
+        required: true
+        type: number
+      comment_id:
+        description: 'Comment ID to react to (omit to skip the reaction step)'
+        required: false
+        type: number
+      prompt_suffix:
+        description: 'Extra text from the user (anything after the command) to append to the prompt'
+        required: false
+        type: string
+        default: ''
+      model:
+        description: 'Claude model to use'
+        required: false
+        type: string
+        default: 'claude-sonnet-4-6'
+      max_turns:
+        description: 'Max conversation turns (overrides per-command default if set)'
+        required: false
+        type: number
+      runner:
+        description: 'GitHub Actions runner label'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+    secrets:
+      anthropic_api_key:
+        description: 'Anthropic API key'
+        required: false
+      claude_code_oauth_token:
+        description: 'Claude Code OAuth token (alternative to anthropic_api_key)'
+        required: false
+      app_id:
+        description: 'GitHub App ID (optional, for higher permission token)'
+        required: false
+      app_private_key:
+        description: 'GitHub App private key (optional, pairs with app_id)'
+        required: false
 
 permissions: read-all
 
 jobs:
   triage:
-    if: >-
-      ${{
-        !github.event.issue.pull_request &&
-        (github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'OWNER') &&
-        (
-          github.event.comment.body == '/triage' ||
-          startsWith(github.event.comment.body, '/triage ')
-        )
-      }}
+    if: inputs.command == 'triage'
     name: Triage Issue
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 20
     concurrency:
-      group: issue-command-triage-${{ github.event.issue.number }}
+      group: issue-command-triage-${{ inputs.issue_number }}
       cancel-in-progress: false
     permissions:
       contents: read
       issues: write
     steps:
       - name: React to the command
-        run: |
-          gh api --method POST "/repos/$REPO/issues/comments/$COMMENT_ID/reactions" -f content='eyes' --silent
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          COMMENT_ID: ${{ github.event.comment.id }}
+        if: ${{ inputs.comment_id != null }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: ${{ inputs.comment_id }},
+              content: 'eyes',
+            });
 
       - uses: actions/checkout@v6.0.3
         with:
           persist-credentials: false
 
+      - name: Mint GitHub App token (optional)
+        id: app-token
+        if: ${{ secrets.app_id != '' && secrets.app_private_key != '' }}
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.app_id }}
+          private-key: ${{ secrets.app_private_key }}
+
       - uses: anthropics/claude-code-action@v1
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          anthropic_api_key: ${{ secrets.anthropic_api_key }}
+          claude_code_oauth_token: ${{ secrets.claude_code_oauth_token }}
+          github_token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           claude_args: |
-            --model claude-sonnet-4-6
-            --max-turns 25
+            --model ${{ inputs.model }}
+            --max-turns ${{ inputs.max_turns || 25 }}
             --allowedTools "Bash,Read"
           prompt: |
-            You are triaging GitHub issue #${{ github.event.issue.number }} in the ${{ github.repository }} repository.
+            You are triaging GitHub issue #${{ inputs.issue_number }} in the ${{ github.repository }} repository.
             Do not modify repository files, issue title, issue body, labels, milestones, assignees, or project metadata.
             Please perform the following actions:
             1. Analyze the issue context and body.
             2. Read the codebase to understand the affected components.
             3. Determine if the issue is a bug, feature request, or question, and list missing information if any.
             4. Post one comment on the issue with a summary of your findings, suggested labels, and recommended next actions.
+            ${{ inputs.prompt_suffix && format('\nAdditional instructions from the user: {0}\n', inputs.prompt_suffix) }}
 
   reprex:
-    if: >-
-      ${{
-        !github.event.issue.pull_request &&
-        (github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'OWNER') &&
-        (
-          github.event.comment.body == '/reprex' ||
-          startsWith(github.event.comment.body, '/reprex ')
-        )
-      }}
+    if: inputs.command == 'reprex'
     name: Reproduce Issue
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 20
     concurrency:
-      group: issue-command-reprex-${{ github.event.issue.number }}
+      group: issue-command-reprex-${{ inputs.issue_number }}
       cancel-in-progress: false
     permissions:
       contents: read
       issues: write
     steps:
       - name: React to the command
-        run: |
-          gh api --method POST "/repos/$REPO/issues/comments/$COMMENT_ID/reactions" -f content='eyes' --silent
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          COMMENT_ID: ${{ github.event.comment.id }}
+        if: ${{ inputs.comment_id != null }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: ${{ inputs.comment_id }},
+              content: 'eyes',
+            });
 
       - uses: actions/checkout@v6.0.3
         with:
           persist-credentials: false
 
+      - name: Mint GitHub App token (optional)
+        id: app-token
+        if: ${{ secrets.app_id != '' && secrets.app_private_key != '' }}
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.app_id }}
+          private-key: ${{ secrets.app_private_key }}
+
       - uses: anthropics/claude-code-action@v1
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          anthropic_api_key: ${{ secrets.anthropic_api_key }}
+          claude_code_oauth_token: ${{ secrets.claude_code_oauth_token }}
+          github_token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           claude_args: |
-            --model claude-sonnet-4-6
-            --max-turns 25
+            --model ${{ inputs.model }}
+            --max-turns ${{ inputs.max_turns || 25 }}
             --allowedTools "Bash,Read"
           prompt: |
-            You are tasked with reproducing GitHub issue #${{ github.event.issue.number }} in the ${{ github.repository }} repository on this Linux runner.
+            You are tasked with reproducing GitHub issue #${{ inputs.issue_number }} in the ${{ github.repository }} repository on this Linux runner.
             Do not modify repository files, issue title, issue body, labels, milestones, assignees, or project metadata.
             Please perform the following actions:
             1. Analyze the issue context and body to identify reproduction steps.
             2. Read the repository codebase to find the relevant code/tests.
             3. Construct and run a minimal reproduction command or script in the Linux environment.
             4. Post one comment on the issue with whether the issue was reproduced, relevant logs/output, and any insights gained.
+            ${{ inputs.prompt_suffix && format('\nAdditional instructions from the user: {0}\n', inputs.prompt_suffix) }}
 
   duplicate:
-    if: >-
-      ${{
-        !github.event.issue.pull_request &&
-        (github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'OWNER') &&
-        (
-          github.event.comment.body == '/duplicate' ||
-          startsWith(github.event.comment.body, '/duplicate ')
-        )
-      }}
+    if: inputs.command == 'duplicate'
     name: Find Duplicates
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 20
     concurrency:
-      group: issue-command-duplicate-${{ github.event.issue.number }}
+      group: issue-command-duplicate-${{ inputs.issue_number }}
       cancel-in-progress: false
     permissions:
       contents: read
       issues: write
     steps:
       - name: React to the command
-        run: |
-          gh api --method POST "/repos/$REPO/issues/comments/$COMMENT_ID/reactions" -f content='eyes' --silent
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          COMMENT_ID: ${{ github.event.comment.id }}
+        if: ${{ inputs.comment_id != null }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: ${{ inputs.comment_id }},
+              content: 'eyes',
+            });
 
       - uses: actions/checkout@v6.0.3
         with:
           persist-credentials: false
 
+      - name: Mint GitHub App token (optional)
+        id: app-token
+        if: ${{ secrets.app_id != '' && secrets.app_private_key != '' }}
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.app_id }}
+          private-key: ${{ secrets.app_private_key }}
+
       - uses: anthropics/claude-code-action@v1
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          anthropic_api_key: ${{ secrets.anthropic_api_key }}
+          claude_code_oauth_token: ${{ secrets.claude_code_oauth_token }}
+          github_token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           claude_args: |
-            --model claude-sonnet-4-6
-            --max-turns 25
+            --model ${{ inputs.model }}
+            --max-turns ${{ inputs.max_turns || 25 }}
             --allowedTools "Bash,Read"
           prompt: |
-            You are searching for duplicate or similar issues to issue #${{ github.event.issue.number }} in the ${{ github.repository }} repository.
+            You are searching for duplicate or similar issues to issue #${{ inputs.issue_number }} in the ${{ github.repository }} repository.
             Do not modify repository files, issue title, issue body, labels, milestones, assignees, or project metadata.
             Please perform the following actions:
             1. Retrieve open and closed issues using the GitHub API or CLI.
-            2. Match titles, descriptions, and keywords of issue #${{ github.event.issue.number }} against other issues in the repository.
-            3. Post one comment on issue #${{ github.event.issue.number }} listing any potentially duplicate or highly related issues, with brief explanations of why they match. If no duplicates are found, explicitly state that in your comment.
+            2. Match titles, descriptions, and keywords of issue #${{ inputs.issue_number }} against other issues in the repository.
+            3. Post one comment on issue #${{ inputs.issue_number }} listing any potentially duplicate or highly related issues, with brief explanations of why they match. If no duplicates are found, explicitly state that in your comment.
+            ${{ inputs.prompt_suffix && format('\nAdditional instructions from the user: {0}\n', inputs.prompt_suffix) }}
 
   issue-fix:
-    if: >-
-      ${{
-        !github.event.issue.pull_request &&
-        (github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'OWNER') &&
-        (
-          github.event.comment.body == '/issue-fix' ||
-          startsWith(github.event.comment.body, '/issue-fix ')
-        )
-      }}
+    if: inputs.command == 'issue-fix'
     name: Fix Issue
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 30
     concurrency:
-      group: issue-command-issue-fix-${{ github.event.issue.number }}
+      group: issue-command-issue-fix-${{ inputs.issue_number }}
       cancel-in-progress: false
     permissions:
       contents: write
@@ -175,28 +234,42 @@ jobs:
       pull-requests: write
     steps:
       - name: React to the command
-        run: |
-          gh api --method POST "/repos/$REPO/issues/comments/$COMMENT_ID/reactions" -f content='rocket' --silent
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          COMMENT_ID: ${{ github.event.comment.id }}
+        if: ${{ inputs.comment_id != null }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: ${{ inputs.comment_id }},
+              content: 'rocket',
+            });
 
       - uses: actions/checkout@v6.0.3
 
+      - name: Mint GitHub App token (optional)
+        id: app-token
+        if: ${{ secrets.app_id != '' && secrets.app_private_key != '' }}
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.app_id }}
+          private-key: ${{ secrets.app_private_key }}
+
       - uses: anthropics/claude-code-action@v1
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          anthropic_api_key: ${{ secrets.anthropic_api_key }}
+          claude_code_oauth_token: ${{ secrets.claude_code_oauth_token }}
+          github_token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           claude_args: |
-            --model claude-sonnet-4-6
-            --max-turns 40
+            --model ${{ inputs.model }}
+            --max-turns ${{ inputs.max_turns || 40 }}
             --allowedTools "Bash,Read,Write,Edit"
           prompt: |
-            You are fixing GitHub issue #${{ github.event.issue.number }} in the ${{ github.repository }} repository.
+            You are fixing GitHub issue #${{ inputs.issue_number }} in the ${{ github.repository }} repository.
             Please perform the following actions:
             1. Analyze the issue details and the codebase.
             2. Design and implement a minimal, correct solution to fix the issue.
-            3. Run the existing tests with `python3 -m unittest discover -s tests` and run any relevant linting commands documented by the repository.
+            3. Run the existing tests and run any relevant linting commands documented by the repository.
             4. Create a new git branch, commit your changes, push to the origin repository, and create a Pull Request referencing the issue.
             5. If a Pull Request cannot be created, post a detailed comment with the suggested fix/patch.
+            ${{ inputs.prompt_suffix && format('\nAdditional instructions from the user: {0}\n', inputs.prompt_suffix) }}

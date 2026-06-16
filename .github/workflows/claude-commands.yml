@@ -1,0 +1,97 @@
+# This workflow is the internal caller for this repo. It triggers on issue_comment
+# events, parses the slash command, and dispatches to the reusable commands.yml
+# workflow in the same repo.
+#
+# Consumers should copy examples/caller.yml instead — not this file.
+
+name: Claude Code Issue Commands
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions: read-all
+
+jobs:
+  parse:
+    name: Parse command
+    runs-on: ubuntu-latest
+    outputs:
+      command: ${{ steps.parse.outputs.command }}
+      issue_number: ${{ steps.parse.outputs.issue_number }}
+      comment_id: ${{ steps.parse.outputs.comment_id }}
+      prompt_suffix: ${{ steps.parse.outputs.prompt_suffix }}
+    steps:
+      - id: parse
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const allow = ['MEMBER', 'OWNER', 'COLLABORATOR'];
+            const isPR = !!context.payload.issue.pull_request;
+            const assoc = context.payload.comment.author_association;
+            const body = (context.payload.comment.body || '').trim();
+            const m = body.match(/^\/(triage|reprex|duplicate|issue-fix)(?:\s+([\s\S]*))?$/);
+
+            if (!isPR && m && allow.includes(assoc)) {
+              core.setOutput('command', m[1]);
+              core.setOutput('issue_number', String(context.payload.issue.number));
+              core.setOutput('comment_id', String(context.payload.comment.id));
+              core.setOutput('prompt_suffix', (m[2] || '').trim());
+            } else {
+              core.setOutput('command', '');
+              core.setOutput('issue_number', '');
+              core.setOutput('comment_id', '');
+              core.setOutput('prompt_suffix', '');
+            }
+
+  triage:
+    needs: parse
+    if: ${{ needs.parse.outputs.command == 'triage' }}
+    uses: ./.github/workflows/commands.yml
+    with:
+      command: triage
+      issue_number: ${{ fromJSON(needs.parse.outputs.issue_number) }}
+      comment_id: ${{ fromJSON(needs.parse.outputs.comment_id) }}
+      prompt_suffix: ${{ needs.parse.outputs.prompt_suffix }}
+    secrets:
+      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+      claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+  reprex:
+    needs: parse
+    if: ${{ needs.parse.outputs.command == 'reprex' }}
+    uses: ./.github/workflows/commands.yml
+    with:
+      command: reprex
+      issue_number: ${{ fromJSON(needs.parse.outputs.issue_number) }}
+      comment_id: ${{ fromJSON(needs.parse.outputs.comment_id) }}
+      prompt_suffix: ${{ needs.parse.outputs.prompt_suffix }}
+    secrets:
+      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+      claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+  duplicate:
+    needs: parse
+    if: ${{ needs.parse.outputs.command == 'duplicate' }}
+    uses: ./.github/workflows/commands.yml
+    with:
+      command: duplicate
+      issue_number: ${{ fromJSON(needs.parse.outputs.issue_number) }}
+      comment_id: ${{ fromJSON(needs.parse.outputs.comment_id) }}
+      prompt_suffix: ${{ needs.parse.outputs.prompt_suffix }}
+    secrets:
+      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+      claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+  issue-fix:
+    needs: parse
+    if: ${{ needs.parse.outputs.command == 'issue-fix' }}
+    uses: ./.github/workflows/commands.yml
+    with:
+      command: issue-fix
+      issue_number: ${{ fromJSON(needs.parse.outputs.issue_number) }}
+      comment_id: ${{ fromJSON(needs.parse.outputs.comment_id) }}
+      prompt_suffix: ${{ needs.parse.outputs.prompt_suffix }}
+    secrets:
+      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+      claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
